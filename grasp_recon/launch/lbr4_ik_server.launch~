@@ -1,0 +1,13 @@
+<launch>
+  <node name="lbr4_action_server" pkg="lbr4_interface" type="joint_trajectory_action_server.py" output="screen"/>
+  <!-- Table top object segmenter-->
+  <!--include file="$(find tabletop_obj_segmentation)/launch/table_obj_segmenter.launch" /-->
+  <!--node name="tabletop_server" pkg="tabletop_obj_segmentation" type="tabletop_object_segmenter"/-->
+  <!-- Environment Collision server -->
+  <node name="env_coll_server" pkg="pcl_mesh_tools" type="arm_hand_collision_server" output="screen"/>
+
+
+  <!-- planner server -->
+  <node name="lbr4_ik_planner_server" pkg="optimization_pkg" type="lbr4_ik_planner_server.py" output="screen"/>
+
+</launch>

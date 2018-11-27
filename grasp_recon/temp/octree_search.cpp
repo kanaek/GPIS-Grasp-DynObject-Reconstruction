@@ -1,0 +1,182 @@
+#include <ros/ros.h>
+#include <visualization_msgs/Marker.h>
+#include <pcl/point_cloud.h>
+#include <pcl_ros/point_cloud.h>
+#include <pcl/octree/octree_search.h>
+#include <pcl/io/pcd_io.h>
+#include <iostream>
+#include <vector>
+#include <ctime>
+#include <math.h>
+
+#define PI 3.14159265
+typedef sensor_msgs::PointCloud2 MsgCloud;
+bool comparePoint(pcl::PointXYZ p1, pcl::PointXYZ p2){
+if (p1.x != p2.x)
+    return p1.x > p2.x;
+else if (p1.y != p2.y)
+    return  p1.y > p2.y;
+else
+    return p1.z > p2.z;
+}
+
+bool equalPoint(pcl::PointXYZ p1, pcl::PointXYZ p2){
+    if (p1.x == p2.x && p1.y == p2.y && p1.z == p2.z)
+        return true;
+    return false;
+}
+
+void cullDuplePoints(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud){
+    std::sort(cloud->points.begin(), cloud->points.end(), comparePoint);
+    //auto unique_end = std::unique(cloud->points.begin(), cloud->points.end(), equalPoint);
+    cloud->points.erase((std::unique(cloud->points.begin(), cloud->points.end(), equalPoint)),cloud->points.end());
+}
+
+int main (int argc, char** argv)
+{
+  ros::init(argc, argv, "basic_shapes");
+  ros::NodeHandle n;
+  ros::Rate r(1);
+  ros::Publisher marker_pub = n.advertise<visualization_msgs::Marker>("visualization_marker1", 1);
+  ros::Publisher obj_cloud_pub_ = n.advertise<MsgCloud>("/object_cloud",1);
+  uint32_t shape = visualization_msgs::Marker::LINE_LIST;
+  visualization_msgs::Marker marker;
+  MsgCloud send_cloud;
+    // Set the frame ID and timestamp.  See the TF tutorials for information on these.
+    marker.header.frame_id = "/world";
+    marker.header.stamp = ros::Time::now();
+
+    // Set the namespace and id for this marker.  This serves to create a unique ID
+    // Any marker sent with the same namespace and id will overwrite the old one
+    marker.ns = "basic_shapes";
+    marker.id = 0;
+
+    // Set the marker type.  Initially this is CUBE, and cycles between that and SPHERE, ARROW, and CYLINDER
+    marker.type = shape;
+
+    // Set the marker action.  Options are ADD, DELETE, and new in ROS Indigo: 3 (DELETEALL)
+    marker.action = visualization_msgs::Marker::ADD;
+
+    // Set the pose of the marker.  This is a full 6DOF pose relative to the frame/time specified in the header
+    marker.pose.position.x = 0;
+    marker.pose.position.y = 0;
+    marker.pose.position.z = 0;
+    marker.pose.orientation.x = 0.0;
+    marker.pose.orientation.y = 0.0;
+    marker.pose.orientation.z = 0.0;
+    marker.pose.orientation.w = 1.0;
+
+    // Set the scale of the marker -- 1x1x1 here means 1m on a side
+    marker.scale.x = 0.01;
+    marker.scale.y = 0.01;
+    marker.scale.z = 0.01;
+
+    // Set the color -- be sure to set alpha to something non-zero!
+    marker.color.r = 0.0f;
+    marker.color.g = 1.0f;
+    marker.color.b = 0.0f;
+    marker.color.a = 1.0;
+    int count = 10;
+    marker.lifetime = ros::Duration();
+  /*
+  pcl::PointCloud<pcl::PointXYZ>::Ptr cloud (new pcl::PointCloud<pcl::PointXYZ>);
+  cloud->width    = 5;
+  cloud->height   = 1;
+  cloud->is_dense = false;
+  cloud->points.resize (cloud->width * cloud->height);
+  for (size_t i = 0; i < cloud->points.size (); ++i)
+  {
+    cloud->points[i].x = 0.1;
+    cloud->points[i].y = 0.1;
+    cloud->points[i].z = 0.1;
+  }
+  cloud->points[2].x = 0.2;
+  cloud->points[2].y = 0.1;
+  cloud->points[2].z = 0.1;
+  cullDuplePoints(cloud);
+  for (size_t i = 0; i < cloud->points.size (); ++i)
+    std::cerr << "    " << cloud->points[i].x << " " << cloud->points[i].y << " " << cloud->points[i].z << std::endl;
+  */
+  srand ((unsigned int) time (NULL));
+
+  pcl::PointCloud<pcl::PointXYZ>::Ptr cloud (new pcl::PointCloud<pcl::PointXYZ>);
+  pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_save (new pcl::PointCloud<pcl::PointXYZ>);
+  if (pcl::io::loadPCDFile<pcl::PointXYZ> ("gpis_pcd.pcd", *cloud) == -1) //* load the file
+  {
+        //PCL_ERROR ("Couldn't read file test_pcd.pcd \n");
+        return (-1);
+  }
+
+
+  float resolution = 0.01;
+  pcl::PointCloud<pcl::PointXYZ>::VectorType voxelsInRay, voxelsInRay2;
+
+  std::vector<int> indicesInRay, indicesInRay2;
+
+  pcl::octree::OctreePointCloudSearch<pcl::PointXYZ> octree (resolution);
+  octree.defineBoundingBox (0.0, 0.0, 0.0, 100.0, 100.0, 100.0);
+  std::cout <<"set resolution done" <<std::endl;
+
+  double theta = 0.0;
+  double phi = 0.0;
+  double R = 3.5;
+  for (theta=0.0;theta<=90.0;theta=theta+2.8) {
+    for (phi=0.0;phi<=90.0;phi=phi+1.3){
+      float x = R*cos ( theta * PI / 180.0 )*cos ( phi * PI / 180.0 );
+      float y = R*cos ( theta * PI / 180.0 )*sin ( phi * PI / 180.0 );
+      float z = R*sin ( theta * PI / 180.0 );
+    Eigen::Vector3f p(static_cast<float> (x),
+                      static_cast<float> (y),
+                      static_cast<float> (z));
+
+    // origin
+    Eigen::Vector3f o(static_cast<float> (0.0),
+                      static_cast<float> (0.0),
+                      static_cast<float> (0.0));
+
+    geometry_msgs::Point p1, p2;
+    p1.x = 0;
+    p1.y = 0;
+    p1.z = 0;
+    p2.x = p[0];
+    p2.y = p[1];
+    p2.z = p[2];
+    marker.points.push_back(p1);
+    marker.points.push_back(p2);
+    // direction vector
+    Eigen::Vector3f dir(p - o);
+    octree.deleteTree();
+    octree.setInputCloud(cloud);
+    octree.addPointsFromInputCloud();
+    octree.getIntersectedVoxelCenters(o, dir, voxelsInRay,1);
+      int count = voxelsInRay.size();
+
+      for (int i = 0; i < count;i++)
+      {
+        cloud_save->push_back(voxelsInRay[i]);
+        std::cout <<i << voxelsInRay[i] << std::endl;
+      }
+    //octree.getIntersectedVoxelIndices(o, dir, indicesInRay);
+    }
+  }
+  
+  cullDuplePoints(cloud_save);
+  
+  cloud_save->header.frame_id = "/world";
+  cloud_save->width    = cloud_save->points.size();
+  cloud_save->height   = 1;
+  cloud->header.frame_id = "/world";
+  cloud->width    = cloud->points.size();
+  cloud->height   = 1;
+  pcl::toROSMsg(*cloud, send_cloud);
+  std::cout <<"after" <<std::endl;
+  while (ros::ok())
+  {
+     marker_pub.publish(marker);
+     obj_cloud_pub_.publish(send_cloud);
+     r.sleep();
+  }
+  //pcl::io::savePCDFileASCII ("test_pcd.pcd", *cloud_save);
+    
+   return 0; 
+}

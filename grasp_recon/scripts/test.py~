@@ -1,0 +1,137 @@
+#!/usr/bin/env python
+import rospy
+from optimization_baxter.srv import *
+from trajectory_msgs.msg import JointTrajectory,JointTrajectoryPoint
+import sys
+import numpy as np
+from rospkg import RosPack
+import PyKDL
+
+rp=RosPack()
+rp.list()
+
+#path=rp.get_path('ll4ma_kdl')+'/scripts'
+
+#sys.path.insert(0,path)
+path_opt_pkg=rp.get_path('optimization_baxter')
+sys.path.insert(0,path_opt_pkg+'/src')
+from kdl_baxter import *
+#from kdl_lbr4_model import *
+from kdl_lbr4_allegro_model import *
+from kdl_baxter_hand_model import *
+#joints_0=np.append(np.array([0.0,0.2,0.0,-1.0,0.0,0.0,1.5]),np.zeros(10))
+joints_0 = np.array([-0.44830588525951215, -0.09779127522769512, 0.1928980840765908, 1.5757817643552914, -0.8199127311247536, 0.2646116859102339, -2.9855101084219866])
+dyn_model=baxterKinematics(T=10)
+allegro = baxter_hand_model(10, 60)
+
+#allegro = lbr4_allegro_model(10, 60)
+lbr4=dyn_model
+lbr4.position_dimension=np.array([1.0,1.0,1.0,0.0,0.0,0.0])
+lbr4.dimension_wt=np.array([1.0,1.0,1.0,0.1,0.1,0.1])
+lbr4.wr=0.1
+lbr4.wc=0.1
+lbr4.wf=40.0
+lbr4.wm=0.01
+path_opt_pkg=rp.get_path('optimization_baxter')
+#sys.path.insert(0,path_opt_pkg+'/src')
+sys.path.insert(0,path_opt_pkg+'/src/ik_planner')
+
+
+import  pyOpt_cost_function as cost_fn
+#import ik_cost,ik_final_cost,ik_cost_gradient,ik_final_cost_gradient from the file below
+from cost_ik_baxter_grasp import *
+import pyOpt_lbr4_vel_constraint as constraint_fn
+import traj_opt as tjO
+
+T = 10
+arm_j0=joints_0[0:7]
+#hand_j0=joints_0[7:]
+u_input=np.array([arm_j0.copy() for k in range(T+1)])
+u_input[0] = joints_0[0:7]  # joints.copy()#joints_des.copy()
+u0 = u_input[0]
+x0=lbr4.end_effector_pose_array(arm_j0)
+
+
+linear_poses=[]
+#x_des=np.zeros(6)
+p1 = [0.11, -0.62, 1.15, 1.32, -0.80, 1.27, -2.39]
+x_des = np.array(lbr4.end_effector_pose_array([x * 1.25 for x in p1]))
+for i in range(T):
+    sample_pose=x0+(x_des-x0)*float(i+1)/T
+    # Building transformation matrix:
+    linear_poses.append(sample_pose)
+
+
+
+import  pyOpt_cost_function as cost_fn
+#opt_options={'MAXIT':50,'IPRINT':0}
+opt_options={'Iterations limit':5000,'Solution':'No','iPrint':0,'iSumm':0}
+        # Initialize opt classes:
+cost_fns=cost_fn.CostFns(ik_cost,ik_final_cost,ik_cost_gradient,ik_final_cost_gradient,lbr4,linear_poses,arm_j0)
+constraint_fns=constraint_fn.ConstraintFns(lbr4,arm_j0,0.2)
+u_bounds=lbr4.bounds
+lbr4.joint_mid_pts=(lbr4.bounds[1]+lbr4.bounds[0])/2.0
+
+#print joint_mid_pts
+low_bounds = []
+up_bounds = []
+for i in range(T):
+    low_bounds.extend(u_bounds[0])
+    up_bounds.extend(u_bounds[1])
+
+variable_bounds=[low_bounds,up_bounds]
+opta=tjO.TrajOpt(lbr4,cost_fns,constraint_fns,variable_bounds,"SNOPT",opt_options)
+
+optimizer=opta.optimizer_init()
+x_d=linear_poses
+u_new,x_new=opta.optimize(optimizer,u0,x_d,u_input,lbr4)
+
+x_final=lbr4.end_effector_pose_array(u_new[-1])
+
+from interpolate_traj import *
+u_interpol=interpolate_traj(u_new,T*10)
+if(len(u_new)<T):
+    u_new=interpolate_traj(u_new,T+1)
+
+# finish optimize_ik above
+
+u_ik = u_new
+
+print u_ik
+print x_final,x_des
+
+
+x_n=lbr4.predict_T(x0,u_input,10)
+x_d=x_des
+q0 = optimizer.cost_fns.get_q(x_n,u_input)
+
+#f=optimizer.cost_fns.objectiveFunction(q0)
+x,u = optimizer.cost_fns.get_x_u_from_q(q0)
+x_d=optimizer.cost_fns.x_d
+u_arr = u[1:-1]
+x_d_arr = x_d[:-1]
+t=np.array([range(lbr4.T-1)]).T
+data_arr=np.concatenate((x_d_arr,u_arr),axis=1)
+data_arr=list(np.concatenate((data_arr,t),axis=1))
+optimizer.cost_fns.multi_cost(data_arr[0])
+cost_arr=[optimizer.cost_fns.multi_cost(k) for k in data_arr]
+cost=sum(cost_arr)
+cost =optimizer.cost_fns.final_cost(x_d[-1],u[-1],lbr4)
+gradient_arr=[optimizer.cost_fns.multi_gradient(data) for data in data_arr]
+gradient=np.ravel(gradient_arr)
+gradient=np.append(gradient,optimizer.cost_fns.gradient_u_final(x_d[-1],u[-1],lbr4))
+
+
+optimizer.objfunc(arm_j0)
+
+u_new,x_new=opta.optimize(optimizer,arm_j0,x_des,u_input,lbr4)
+
+x_final=lbr4.end_effector_pose_array(u_new[-1])
+
+print x_final
+
+
+if __name__ == '__main__':
+    rospy.init_node("ik_server")
+    print 'hello'
+    #rospy.spin()

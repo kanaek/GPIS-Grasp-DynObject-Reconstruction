@@ -1,0 +1,5 @@
+
+sensor_msgs/PointCloud2 obj_cloud
+---
+bool success
+sensor_msgs/PointCloud2 return_obj_cloud

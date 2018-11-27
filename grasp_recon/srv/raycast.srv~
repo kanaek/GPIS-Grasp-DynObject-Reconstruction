@@ -1,0 +1,6 @@
+
+sensor_msgs/PointCloud2 obj_cloud
+---
+bool success
+sensor_msgs/PointCloud2 ray_cast_cloud
+int16[] data

@@ -1,0 +1,6 @@
+
+float64[] desired_pose
+float64[] initial_joint_angles
+---
+bool collision_free
+trajectory_msgs/JointTrajectory joint_traj
